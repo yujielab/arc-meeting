@@ -1,0 +1,24 @@
+# Cloudflare Worker 配置 — Arc Meeting Lobby
+#
+# 部署:  wrangler deploy
+# 本地:  wrangler dev
+
+name = "arc-meeting"
+main = "src/worker.js"
+compatibility_date = "2025-01-13"
+
+# 静态资源绑定: ./public/ 下的所有文件 (pll.html 等) 会被自动 serve.
+# 注意: 把现有的 Arc 客户端 pll.html 放到 public/ 目录下.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# 可选环境变量 (非敏感, 写在 vars 里; 敏感的用 secret put):
+# [vars]
+# RTK_PRESET_NAME = "group_call_host"   # 默认 preset
+# CALL_PATH = "/pll.html"                # 通话页路径
+
+# === Secrets (用 wrangler secret put 设置, 不在文件里) ===
+#   wrangler secret put CF_ACCOUNT_ID   # Cloudflare 账户 ID
+#   wrangler secret put CF_API_TOKEN    # API token (权限: Realtime — Edit)
+#   wrangler secret put RTK_APP_ID      # RealtimeKit App ID
