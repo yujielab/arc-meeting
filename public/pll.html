@@ -1,0 +1,1909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Arc UI - Pure Minimalist</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #F5F5F7; }
+
+        .fullscreen-container {
+            width: 100vw; height: 100vh; position: relative;
+            background: #F5F5F7;
+            display: flex; flex-direction: column; align-items: center; color: #1D1D1F; z-index: 1;
+        }
+
+        .header { margin-top: calc(20px + env(safe-area-inset-top)); font-size: 17px; font-weight: 600; color: #1D1D1F; letter-spacing: -0.5px; }
+        .title { position: absolute; top: 10vh; font-size: 56px; font-weight: 700; letter-spacing: -1.5px; color: #1D1D1F; text-shadow: 0 4px 20px rgba(0, 0, 0, 0.04); }
+        /* RTK 连接状态副标题: 位于 Arc 标题下方 (顶部小字, FaceTime 风格) */
+        .subtitle {
+            position: absolute;
+            top: calc(10vh + 72px);
+            font-size: 13px;
+            font-weight: 500;
+            color: #86868B;
+            letter-spacing: -0.1px;
+            display: flex; align-items: center; gap: 6px;
+            opacity: 0; transform: translateY(-4px);
+            transition: opacity 0.4s ease, transform 0.4s ease, color 0.3s ease;
+            pointer-events: none;
+        }
+        .subtitle.visible { opacity: 1; transform: translateY(0); }
+        .subtitle .conn-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: #86868B;
+            transition: background 0.3s ease;
+        }
+        .subtitle.connecting .conn-dot { background: #FF9F0A; animation: livePulse 1.0s ease-in-out infinite; }
+        .subtitle.live .conn-dot       { background: #34C759; animation: livePulse 1.6s ease-in-out infinite; }
+        .subtitle.error .conn-dot      { background: #FF3B30; }
+        .subtitle.live   { color: #1D1D1F; }
+        .subtitle.error  { color: #FF3B30; }
+        .main-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; padding-bottom: 5vh; }
+
+        .hero-container {
+            position: relative; width: 280px; height: 280px;
+            display: flex; justify-content: center; align-items: center;
+            overflow: visible;
+            /* 3D 透视: 让 .face-3d 的 rotateX/Y/Z 有真实的近大远小效果 */
+            perspective: 900px;
+            perspective-origin: 50% 50%;
+        }
+
+        .face-layer {
+            position: absolute; z-index: 3; width: 140px; height: 110px;
+            animation: breathing 4s ease-in-out infinite;
+            cursor: grab;
+            overflow: visible;
+            /* 保留 3D 上下文, 让子元素的 rotateX/Y/Z 不被 breathing 的 transform 拍扁 */
+            transform-style: preserve-3d;
+        }
+
+        /* 头部 3D 朝向的旋转层 (跟随真人头部 yaw/pitch/roll) */
+        .face-3d {
+            width: 100%; height: 100%;
+            transform-style: preserve-3d;
+            transform-origin: 50% 55%;
+            will-change: transform;
+        }
+
+        /* overflow:visible 让被拖出 viewBox 的眼/嘴依然能在屏幕任何位置渲染 */
+        .face-layer svg {
+            width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none;
+            overflow: visible;
+            filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.08));
+        }
+
+        @keyframes breathing { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.02); } }
+
+        .eye-rect { animation: swiftBlink 4.5s infinite; transform-origin: center; }
+        @keyframes swiftBlink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.05); } }
+
+        body.face-tracking-active .eye-rect { animation: none; }
+        body.grabbing .face-layer { animation: none; cursor: grabbing; }
+        body.grabbing { user-select: none; -webkit-user-select: none; }
+
+        .bubble-container { position: absolute; top: 65vh; display: flex; flex-direction: column; align-items: center; }
+        .bubble-dot { width: 10px; height: 10px; background-color: rgba(255,255,255,0.9); border-radius: 50%; margin-bottom: 5px; margin-left: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.06); }
+        .speech-bubble {
+            background-color: rgba(255, 255, 255, 0.7); backdrop-filter: blur(25px) saturate(180%); -webkit-backdrop-filter: blur(25px) saturate(180%);
+            color: #1D1D1F; padding: 14px 32px; border-radius: 30px; font-size: 18px; font-weight: 600; letter-spacing: -0.3px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.06), inset 0 0 0 1px rgba(255,255,255,0.5);
+            transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .bubble-pop { animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+        @keyframes popIn { 0% { transform: scale(0.8) translateY(10px); opacity: 0; } 100% { transform: scale(1) translateY(0px); opacity: 1; } }
+
+        .controls {
+            width: 100%; max-width: 420px; padding: 0 30px calc(40px + env(safe-area-inset-bottom)) 30px;
+            display: flex; justify-content: space-between; align-items: flex-start; position: absolute; bottom: 0; z-index: 10;
+        }
+        .control-btn-wrapper { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .btn {
+            width: 76px; height: 76px; border-radius: 50%; border: none; display: flex; justify-content: center; align-items: center;
+            cursor: pointer; transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+        .btn:active { transform: scale(0.9); }
+        .btn-speaker { background-color: #ffffff; color: #1D1D1F; box-shadow: 0 10px 25px rgba(0,0,0,0.06); transition: background 0.25s ease, color 0.25s ease; }
+        .btn-speaker.muted { background-color: #1D1D1F; color: #fff; }
+        .btn-end { background-color: #FF3B30; color: white; box-shadow: 0 10px 25px rgba(255, 59, 48, 0.2); }
+        .btn-react {
+            background-color: rgba(255, 255, 255, 0.6); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+            color: #1D1D1F; border: 1px solid rgba(255,255,255,0.8); box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+        }
+        .label { font-size: 13px; font-weight: 500; color: #86868B; letter-spacing: -0.2px; }
+
+        .face-track-btn {
+            position: absolute;
+            top: calc(20px + env(safe-area-inset-top));
+            right: 20px;
+            z-index: 30;
+            display: flex; align-items: center; gap: 6px;
+            padding: 8px 14px;
+            border-radius: 100px;
+            border: none;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.06), inset 0 0 0 1px rgba(255,255,255,0.6);
+            color: #1D1D1F;
+            font-size: 13px; font-weight: 600; letter-spacing: -0.2px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+        .face-track-btn:active { transform: scale(0.94); }
+        .face-track-btn.active { background: #1D1D1F; color: #fff; box-shadow: 0 8px 20px rgba(0,0,0,0.18); }
+        .face-track-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: #86868B; }
+        .face-track-btn.active .dot { background: #FF3B30; animation: livePulse 1.6s ease-in-out infinite; }
+        .face-track-btn.loading .dot, .face-track-btn.calibrating .dot { background: #FF9F0A; animation: livePulse 1.0s ease-in-out infinite; }
+        @keyframes livePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .cam-preview {
+            position: absolute;
+            top: calc(70px + env(safe-area-inset-top));
+            right: 20px;
+            width: 110px; height: 82px;
+            border-radius: 14px;
+            overflow: hidden;
+            z-index: 29;
+            background: #000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(255,255,255,0.5);
+            opacity: 0;
+            transform: translateY(-8px) scale(0.9);
+            pointer-events: none;
+            cursor: pointer;
+            transition: opacity 0.3s ease,
+                        transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        border-radius 0.3s ease,
+                        background 0.3s ease;
+        }
+        .cam-preview.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .cam-preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); transition: opacity 0.25s ease; }
+        .cam-preview .calib-ring {
+            position: absolute; inset: 0; border: 3px solid #FF9F0A;
+            border-radius: 14px; opacity: 0; pointer-events: none;
+        }
+        .cam-preview.calibrating .calib-ring { opacity: 1; animation: calibPulse 1.0s ease-in-out infinite; }
+        @keyframes calibPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 159, 10, 0.5); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 159, 10, 0); }
+        }
+
+        /* 摄像头预览里的手骨架 canvas (跟视频一样左右镜像) */
+        .cam-preview canvas {
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1);
+            transition: opacity 0.25s ease;
+        }
+        /* 缩小态: 隐藏视频/骨架, 留一个 44px 圆形相机图标按钮 */
+        .cam-preview .cam-mini-icon {
+            position: absolute; inset: 0;
+            width: 50%; height: 50%; margin: auto;
+            color: #1D1D1F;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+        .cam-preview.minimized {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.12), inset 0 0 0 1px rgba(255,255,255,0.6);
+        }
+        .cam-preview.minimized video,
+        .cam-preview.minimized canvas { opacity: 0; }
+        .cam-preview.minimized .calib-ring { display: none; }
+        .cam-preview.minimized .cam-mini-icon { opacity: 0.92; }
+
+        /* 主视图里的手势 SVG: 米老鼠手套风格 (白手套 + 黑描边 + 3 道针脚 + 袖口) */
+        #hand-layer {
+            position: absolute; inset: 0;
+            pointer-events: none; z-index: 18;
+            overflow: hidden;
+        }
+        .hand-svg {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.25s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+            overflow: visible;
+        }
+        .hand-svg.visible { opacity: 1; }
+        .hand-svg path { stroke-linecap: round; stroke-linejoin: round; }
+
+        /* 第一层: 黑色粗描边 已透明化 (边缘由 drop-shadow 提供); 仅捏合时染红可见 */
+        .hand-svg .outline {
+            fill: none;
+            stroke: transparent;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: stroke 0.18s ease;
+        }
+        /* 手掌: 纯白填充 */
+        .hand-svg .palm-shape {
+            fill: #ffffff;
+            stroke: none;
+        }
+        /* 第二层: 白色笔触 (现在是唯一可见的手指主体) */
+        .hand-svg .fill {
+            fill: none;
+            stroke: #ffffff;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: stroke 0.18s ease;
+        }
+        /* 手主体: 多层 drop-shadow 在白色边缘外形成柔和阴影, 替代原本的黑描边 */
+        .hand-svg .hand-body {
+            filter:
+                drop-shadow(0 0 0.6px rgba(0, 0, 0, 0.55))
+                drop-shadow(0 2px 4px rgba(0, 0, 0, 0.22))
+                drop-shadow(0 8px 22px rgba(0, 0, 0, 0.12));
+        }
+
+
+        .reaction-drawer {
+            position: absolute; bottom: -55vh; left: 0; width: 100%; height: 50vh;
+            background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%);
+            border-top: 1px solid rgba(255,255,255,0.8); border-radius: 36px 36px 0 0;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.06);
+            z-index: 20; transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+            padding: 16px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
+            display: flex; flex-direction: column;
+        }
+        .reaction-drawer.open { transform: translateY(-55vh); }
+        .drawer-handle { width: 40px; height: 5px; background: rgba(0,0,0,0.15); border-radius: 5px; margin: 0 auto 24px auto; }
+
+        .svg-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(55px, 1fr));
+            gap: 15px; overflow-y: auto; flex: 1; padding-bottom: 20px;
+        }
+        .svg-grid::-webkit-scrollbar { display: none; }
+
+        .svg-btn {
+            background: rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.02);
+            border-radius: 18px; padding: 10px; cursor: pointer; transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+            display: flex; justify-content: center; align-items: center;
+        }
+        .svg-btn:active { transform: scale(0.85); background: rgba(0,0,0,0.08); }
+        .svg-btn svg { width: 100%; height: auto; }
+
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.15); z-index: 19; opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
+        }
+        .overlay.active { opacity: 1; pointer-events: auto; }
+
+        #particle-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 15; overflow: hidden; }
+        .floating-svg {
+            position: absolute; bottom: 120px; width: 60px; height: 60px;
+            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.1));
+            animation: floatUp var(--duration) cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+        @keyframes floatUp {
+            0% { transform: translate(0, 0) scale(0.2); opacity: 0; }
+            10% { transform: translate(var(--tx-mid), -10vh) scale(1); opacity: 1; }
+            100% { transform: translate(var(--tx-end), -80vh) scale(0.8); opacity: 0; }
+        }
+    </style>
+    <!-- Cloudflare RealtimeKit Core SDK (CDN). 不依赖 UI Kit, 用现有自定义 UI 驱动. -->
+    <script src="https://cdn.jsdelivr.net/npm/@cloudflare/realtimekit@latest/dist/browser.js"></script>
+</head>
+<body>
+
+<div class="fullscreen-container">
+    <div class="header">9:41</div>
+    <div class="title">Arc</div>
+    <div class="subtitle" id="rtk-status">
+        <span class="conn-dot"></span>
+        <span id="rtk-status-text">Solo</span>
+    </div>
+    <div id="particle-container"></div>
+
+    <button class="face-track-btn" id="face-track-btn">
+        <span class="dot"></span>
+        <span id="face-track-label">Track Face</span>
+    </button>
+    <div class="cam-preview" id="cam-preview">
+        <video id="cam-video" autoplay muted playsinline></video>
+        <canvas id="cam-canvas" width="220" height="164"></canvas>
+        <div class="calib-ring"></div>
+        <!-- 缩小态下显示的相机图标; 点击整个 cam-preview 切换缩放 -->
+        <svg class="cam-mini-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+            <circle cx="12" cy="13" r="3.5"/>
+        </svg>
+    </div>
+
+    <div id="hand-layer">
+        <!-- 极简手套: 每根手指从腕点辐射而出 (一笔成形); Vision OS 模糊渐出 -->
+        <svg class="hand-svg" id="hand-svg-0" width="100%" height="100%" preserveAspectRatio="none">
+            <defs>
+                <!-- ① 不透明渐变: 控制手指区域完全可见, 腕部开始衰减 -->
+                <linearGradient id="hfg-0" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="300">
+                    <stop offset="0%"   stop-color="white" stop-opacity="0"/>
+                    <stop offset="50%"  stop-color="white" stop-opacity="0.75"/>
+                    <stop offset="100%" stop-color="white" stop-opacity="1"/>
+                </linearGradient>
+                <mask id="hfm-0" maskUnits="userSpaceOnUse">
+                    <rect x="-9999" y="-9999" width="99999" height="99999" fill="url(#hfg-0)"/>
+                </mask>
+                <!-- ② Vision OS 腕部模糊滤镜: 大 stdDeviation 制造柔焦晕散 -->
+                <filter id="hbf-0" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="sRGB">
+                    <feGaussianBlur stdDeviation="20"/>
+                </filter>
+            </defs>
+            <!-- 主手体: 不透明遮罩 + 多层 drop-shadow 阴影边缘 -->
+            <g class="hand-body" mask="url(#hfm-0)">
+                <path class="palm-shape"></path>
+                <path class="outline thumb-outline"></path>
+                <path class="outline index-outline"></path>
+                <path class="outline middle-outline"></path>
+                <path class="outline ring-outline"></path>
+                <path class="outline pinky-outline"></path>
+                <path class="fill thumb-fill"></path>
+                <path class="fill index-fill"></path>
+                <path class="fill middle-fill"></path>
+                <path class="fill ring-fill"></path>
+                <path class="fill pinky-fill"></path>
+            </g>
+            <!-- Vision OS 腕部光晕: 背景色模糊椭圆, 覆盖腕以下, 柔化消融边界 -->
+            <ellipse class="wrist-glow" fill="#F5F5F7" filter="url(#hbf-0)" opacity="0.96"/>
+        </svg>
+        <svg class="hand-svg" id="hand-svg-1" width="100%" height="100%" preserveAspectRatio="none">
+            <defs>
+                <linearGradient id="hfg-1" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="300">
+                    <stop offset="0%"   stop-color="white" stop-opacity="0"/>
+                    <stop offset="50%"  stop-color="white" stop-opacity="0.75"/>
+                    <stop offset="100%" stop-color="white" stop-opacity="1"/>
+                </linearGradient>
+                <mask id="hfm-1" maskUnits="userSpaceOnUse">
+                    <rect x="-9999" y="-9999" width="99999" height="99999" fill="url(#hfg-1)"/>
+                </mask>
+                <filter id="hbf-1" x="-200%" y="-200%" width="500%" height="500%" color-interpolation-filters="sRGB">
+                    <feGaussianBlur stdDeviation="20"/>
+                </filter>
+            </defs>
+            <g class="hand-body" mask="url(#hfm-1)">
+                <path class="palm-shape"></path>
+                <path class="outline thumb-outline"></path>
+                <path class="outline index-outline"></path>
+                <path class="outline middle-outline"></path>
+                <path class="outline ring-outline"></path>
+                <path class="outline pinky-outline"></path>
+                <path class="fill thumb-fill"></path>
+                <path class="fill index-fill"></path>
+                <path class="fill middle-fill"></path>
+                <path class="fill ring-fill"></path>
+                <path class="fill pinky-fill"></path>
+            </g>
+            <ellipse class="wrist-glow" fill="#F5F5F7" filter="url(#hbf-1)" opacity="0.96"/>
+        </svg>
+    </div>
+
+    <div class="main-content">
+        <div class="hero-container">
+            <div class="face-layer" id="face-container">
+                <div class="face-3d" id="face-3d">
+                    <svg id="face-svg" width="100%" height="100%" viewBox="0 0 100 80">
+                        <g id="eye-left"><rect class="eye-rect" x="25" y="10" width="10" height="30" rx="5" fill="#1D1D1F" style="transform-origin: 30px 25px;"/></g>
+                        <g id="eye-right"><rect class="eye-rect" x="65" y="10" width="10" height="30" rx="5" fill="#1D1D1F" style="transform-origin: 70px 25px;"/></g>
+                        <path id="mouth" d="M 15 55 Q 50 85 85 55" fill="none" stroke="#1D1D1F" stroke-width="10" stroke-linecap="round" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+        <div class="bubble-container">
+            <div class="bubble-dot"></div>
+            <div class="speech-bubble bubble-pop" id="speech-text">React!</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="control-btn-wrapper">
+            <button class="btn btn-speaker" onclick="triggerExpression('smile', 'Smooth!')"><svg fill="currentColor" viewBox="0 0 24 24" width="30" height="30"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
+            <span class="label">Speaker</span>
+        </div>
+        <div class="control-btn-wrapper">
+            <button class="btn btn-end"><svg fill="currentColor" viewBox="0 0 24 24" width="34" height="34"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg></button>
+            <span class="label">End</span>
+        </div>
+        <div class="control-btn-wrapper">
+            <button class="btn btn-react" id="react-btn">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="28" height="28" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                </svg>
+            </button>
+            <span class="label">React</span>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay"></div>
+    <div class="reaction-drawer" id="reaction-drawer">
+        <div class="drawer-handle"></div>
+        <div class="svg-grid" id="svg-grid"></div>
+    </div>
+</div>
+
+<script>
+    /* =========================================
+       原表情数据集
+       ========================================= */
+    const states = {
+        'smile':       { p: [15,55,50,85,85,55], l: [0,0,1,1,0], r: [0,0,1,1,0], t: "Hi!" },
+        'laugh':       { p: [15,45,50,95,85,45], l: [0,0,1,0.8,0], r: [0,0,1,0.8,0], t: "Haha!" },
+        'smirk':       { p: [15,60,50,70,85,45], l: [0,0,1,1,0], r: [0,0,1,1,0], t: "Heh." },
+        'cute':        { p: [35,60,50,75,65,60], l: [0,0,1,0.7,0], r: [0,0,1,0.7,0], t: "Aww~" },
+        'excited':     { p: [15,50,50,90,85,50], l: [0,-5,1,1.2,0], r: [0,-5,1,1.2,0], t: "Wow!" },
+        'gentle':      { p: [25,60,50,70,75,60], l: [0,0,1,0.4,0], r: [0,0,1,0.4,0], t: "Okay." },
+        'neutral':     { p: [20,60,50,60,80,60], l: [0,0,1,1,0], r: [0,0,1,1,0], t: "..." },
+        'think_L':     { p: [25,65,50,65,75,65], l: [-8,-6,1,1,0], r: [-8,-6,1,1,0], t: "Hmm..." },
+        'think_R':     { p: [25,65,50,65,75,65], l: [8,-6,1,1,0], r: [8,-6,1,1,0], t: "Let's see..." },
+        'focus':       { p: [35,60,50,60,65,60], l: [0,0,0.8,1,0], r: [0,0,0.8,1,0], t: "Got it." },
+        'sus':         { p: [15,60,50,55,85,60], l: [0,5,1,0.3,0], r: [0,5,1,0.3,0], t: "Really?" },
+        'confused':    { p: [25,65,50,50,75,75], l: [-3,0,1,1,0], r: [3,0,1,1,0], t: "Wait, what?" },
+        'oh':          { p: [35,65,50,45,65,65], l: [0,-2,1,1,0], r: [0,-2,1,1,0], t: "Oh!" },
+        'wow':         { p: [30,60,50,90,70,60], l: [0,-5,1.2,1.2,0], r: [0,-5,1.2,1.2,0], t: "Amazing!" },
+        'shocked':     { p: [40,60,50,80,60,60], l: [0,0,0.6,0.6,0], r: [0,0,0.6,0.6,0], t: "Gasp!" },
+        'yawn':        { p: [20,50,50,90,80,50], l: [0,0,1,0.1,0], r: [0,0,1,0.1,0], t: "Yawn..." },
+        'dizzy':       { p: [25,60,50,75,75,50], l: [0,0,1,1,15], r: [0,0,1,1,-15], t: "Woah..." },
+        'blank':       { p: [45,60,50,60,55,60], l: [0,0,0.5,0.5,0], r: [0,0,0.5,0.5,0], t: "Loading..." },
+        'sad':         { p: [20,75,50,50,80,75], l: [0,3,1,1,0], r: [0,3,1,1,0], t: "Sad." },
+        'disgust':     { p: [15,65,50,55,85,70], l: [0,0,1,0.4,0], r: [0,0,1,0.4,0], t: "Eww." },
+        'awkward':     { p: [20,60,50,60,80,60], l: [-10,0,1,1,0], r: [-10,0,1,1,0], t: "Umm..." },
+        'plead':       { p: [30,70,50,60,70,70], l: [0,2,1.3,1.3,0], r: [0,2,1.3,1.3,0], t: "Please?" },
+        'nervous':     { p: [25,60,50,65,75,60], l: [0,0,0.8,0.8,0], r: [0,0,0.8,0.8,0], t: "Uh oh." },
+        'tired':       { p: [30,65,50,65,70,65], l: [0,10,1,0.1,0], r: [0,10,1,0.1,0], t: "Tired." },
+        'wink_L':      { p: [15,55,50,80,85,55], l: [0,0,1,0.1,0], r: [0,0,1,1,0], t: "*Wink*" },
+        'wink_R':      { p: [15,55,50,80,85,55], l: [0,0,1,1,0], r: [0,0,1,0.1,0], t: "Gotcha." },
+        'cheeky':      { p: [15,55,50,80,85,65], l: [0,-2,1,1,0], r: [0,0,1,0.2,0], t: "Hehe." },
+        'meh':         { p: [15,65,50,62.5,85,60], l: [0,0,1,0.6,0], r: [0,0,1,0.6,0], t: "Meh." },
+        'pout':        { p: [40,60,50,55,60,60], l: [0,2,1,1,0], r: [0,2,1,1,0], t: "Hmph." },
+        'sneaky':      { p: [15,60,50,70,85,50], l: [10,0,1,0.5,0], r: [10,0,1,0.5,0], t: "Sneaky." }
+    };
+
+    /* =========================================
+       Spring (升级: 支持 frozen 冻结 + bounce 弹性回弹)
+       ========================================= */
+    class Spring {
+        constructor(val, tension = 0.12, friction = 0.70) {
+            this.val = val; this.target = val; this.vel = 0;
+            this.tension = tension;
+            this.baseFriction = friction;
+            this.frozen = false;
+            this.bounceFrames = 0;
+        }
+        bounce(frames = 28) { this.bounceFrames = frames; }
+        update() {
+            if (this.frozen) return this.val;
+            const friction = this.bounceFrames > 0 ? 0.88 : this.baseFriction;
+            if (this.bounceFrames > 0) this.bounceFrames--;
+            const force = (this.target - this.val) * this.tension;
+            this.vel = (this.vel + force) * friction;
+            this.val += this.vel;
+            return this.val;
+        }
+    }
+
+    const sMouth = Array.from({length: 6}, (_, i) => new Spring(states.smile.p[i]));
+    const sLeft  = Array.from({length: 5}, (_, i) => new Spring(states.smile.l[i]));
+    const sRight = Array.from({length: 5}, (_, i) => new Spring(states.smile.r[i]));
+
+    /* =========================================
+       头部 3D 朝向 (yaw / pitch / roll, 度)
+       靠 MediaPipe 的 facialTransformationMatrixes 驱动
+       ========================================= */
+    const sYaw   = new Spring(0, 0.18, 0.74);
+    const sPitch = new Spring(0, 0.18, 0.74);
+    const sRoll  = new Spring(0, 0.20, 0.72);
+    // 校准基线: 用户校准时的 "静止头位" 作为 0 朝向
+    const poseBaseline = { yaw: 0, pitch: 0, roll: 0 };
+    let poseCalibSamples = null;
+    const HEAD_MAX_DEG = 35;          // 朝向限幅, 防止过度旋转把脸转没
+    const HEAD_GAIN    = 1.15;        // 略放大用户头部姿态, 表演感更强
+
+    function _med(arr) { arr.sort((a, b) => a - b); return arr[Math.floor(arr.length / 2)] || 0; }
+    function _clampDeg(v) { return Math.max(-HEAD_MAX_DEG, Math.min(HEAD_MAX_DEG, v)); }
+
+    window.startHeadPoseCalib = function () {
+        poseCalibSamples = { yaw: [], pitch: [], roll: [] };
+    };
+    window.endHeadPoseCalib = function () {
+        if (poseCalibSamples && poseCalibSamples.yaw.length > 3) {
+            poseBaseline.yaw   = _med(poseCalibSamples.yaw);
+            poseBaseline.pitch = _med(poseCalibSamples.pitch);
+            poseBaseline.roll  = _med(poseCalibSamples.roll);
+        }
+        poseCalibSamples = null;
+    };
+    window.resetHeadPose = function () {
+        sYaw.target = sPitch.target = sRoll.target = 0;
+        poseBaseline.yaw = poseBaseline.pitch = poseBaseline.roll = 0;
+        poseCalibSamples = null;
+    };
+    /**
+     * 从 MediaPipe 4x4 列主序矩阵抽 YXZ 欧拉角并喂给三个弹簧的 target.
+     * 摄像头是镜像预览, 所以 yaw / roll 翻号, 让 SVG 像照镜子一样跟着用户头转.
+     */
+    window.applyHeadPoseFromMatrix = function (M) {
+        // 列主序 4x4 -> 旋转 3x3
+        // r00=M[0] r01=M[4] r02=M[8]
+        // r10=M[1] r11=M[5] r12=M[9]
+        // r20=M[2] r21=M[6] r22=M[10]
+        const r02 = M[8], r12 = M[9], r22 = M[10], r10 = M[1], r11 = M[5];
+        const RAD = 180 / Math.PI;
+        let pitch = Math.asin(Math.max(-1, Math.min(1, -r12))) * RAD;  // 抬/低头
+        let yaw   = Math.atan2(r02, r22) * RAD;                        // 摇头
+        let roll  = Math.atan2(r10, r11) * RAD;                        // 歪头
+
+        if (poseCalibSamples) {
+            poseCalibSamples.yaw.push(yaw);
+            poseCalibSamples.pitch.push(pitch);
+            poseCalibSamples.roll.push(roll);
+            return;   // 校准阶段只收样本, 不驱动渲染
+        }
+
+        // 减去校准基线, 用户的静止头位 == 0 朝向
+        yaw   -= poseBaseline.yaw;
+        pitch -= poseBaseline.pitch;
+        roll  -= poseBaseline.roll;
+
+        // 镜像翻号 (selfie view): 用户向右转, 屏幕里的脸也朝屏幕右
+        yaw   =  yaw   * HEAD_GAIN;
+        roll  =  roll  * HEAD_GAIN;
+        pitch =  pitch * HEAD_GAIN;
+
+        yaw   = _clampDeg(yaw);
+        pitch = _clampDeg(pitch);
+        roll  = _clampDeg(roll);
+
+        // 快照给 RTK 广播 (post-baseline, post-gain, post-clamp; 直接是 UI 目标值)
+        window.rtkLatestPose = { yaw, pitch, roll };
+
+        // 远端面部正在驱动本地 avatar → 跳过本地头位更新, 让远端的 pose 接管
+        if (window.rtkRemoteActive) return;
+
+        // 用户正在捏脸时, 不让头部跟手指乱晃 (体验更稳)
+        if (document.body.classList.contains('grabbing')) return;
+
+        sYaw.target   = yaw;
+        sPitch.target = pitch;
+        sRoll.target  = roll;
+    };
+
+    const mouthEl = document.getElementById('mouth');
+    const eyeLEl  = document.getElementById('eye-left');
+    const eyeREl  = document.getElementById('eye-right');
+    const face3DEl = document.getElementById('face-3d');
+
+    function renderLoop() {
+        const m = sMouth.map(s => s.update());
+        mouthEl.setAttribute('d', `M ${m[0]} ${m[1]} Q ${m[2]} ${m[3]} ${m[4]} ${m[5]}`);
+        const l = sLeft.map(s => s.update());
+        const r = sRight.map(s => s.update());
+        eyeLEl.style.transform = `translate3d(${l[0]}px, ${l[1]}px, 0) scale(${l[2]}, ${l[3]}) rotate(${l[4]}deg)`;
+        eyeREl.style.transform = `translate3d(${r[0]}px, ${r[1]}px, 0) scale(${r[2]}, ${r[3]}) rotate(${r[4]}deg)`;
+        // 头部 3D 朝向 (顺序: 先 Y 偏航, 再 X 俯仰, 最后 Z 翻滚 -> 直觉的头部旋转)
+        const yaw   = sYaw.update();
+        const pitch = sPitch.update();
+        const roll  = sRoll.update();
+        face3DEl.style.transform = `rotateY(${yaw}deg) rotateX(${pitch}deg) rotateZ(${roll}deg)`;
+        requestAnimationFrame(renderLoop);
+    }
+    renderLoop();
+
+    function generateSVGString(key) {
+        const s = states[key];
+        return `
+            <svg viewBox="0 0 100 80">
+                <rect x="25" y="10" width="10" height="30" rx="5" fill="#1D1D1F"
+                      style="transform-origin: 30px 25px; transform: translate(${s.l[0]}px, ${s.l[1]}px) scale(${s.l[2]}, ${s.l[3]}) rotate(${s.l[4]}deg);"/>
+                <rect x="65" y="10" width="10" height="30" rx="5" fill="#1D1D1F"
+                      style="transform-origin: 70px 25px; transform: translate(${s.r[0]}px, ${s.r[1]}px) scale(${s.r[2]}, ${s.r[3]}) rotate(${s.r[4]}deg);"/>
+                <path d="M ${s.p[0]} ${s.p[1]} Q ${s.p[2]} ${s.p[3]} ${s.p[4]} ${s.p[5]}" fill="none" stroke="#1D1D1F" stroke-width="10" stroke-linecap="round"/>
+            </svg>
+        `;
+    }
+
+    function triggerExpression(key, customText = null) {
+        if (!window.faceTracking) {
+            const target = states[key];
+            for(let i=0; i<6; i++) sMouth[i].target = target.p[i];
+            for(let i=0; i<5; i++) { sLeft[i].target = target.l[i]; sRight[i].target = target.r[i]; }
+        }
+        const bubble = document.querySelector('.speech-bubble');
+        const textEl = document.getElementById('speech-text');
+        bubble.classList.remove('bubble-pop');
+        void bubble.offsetWidth;
+        textEl.innerText = customText || states[key].t;
+        bubble.classList.add('bubble-pop');
+        if(!customText) spawnFloatingSVG(key);
+    }
+    window.triggerExpression = triggerExpression;
+
+    const particleContainer = document.getElementById('particle-container');
+    function spawnFloatingSVG(key) {
+        const div = document.createElement('div');
+        div.className = 'floating-svg';
+        div.innerHTML = generateSVGString(key);
+        const startX = window.innerWidth * 0.8 + (Math.random() - 0.5) * 50;
+        const txMid = (Math.random() - 0.5) * 150 + 'px';
+        const txEnd = (Math.random() - 0.5) * 200 + 'px';
+        const duration = (Math.random() * 1.5 + 2) + 's';
+        div.style.left = `${startX}px`;
+        div.style.setProperty('--tx-mid', txMid);
+        div.style.setProperty('--tx-end', txEnd);
+        div.style.setProperty('--duration', duration);
+        particleContainer.appendChild(div);
+        setTimeout(() => div.remove(), parseFloat(duration) * 1000);
+    }
+
+    const grid = document.getElementById('svg-grid');
+    Object.keys(states).forEach(key => {
+        const btn = document.createElement('button');
+        btn.className = 'svg-btn';
+        btn.innerHTML = generateSVGString(key);
+        btn.onclick = () => { triggerExpression(key); };
+        grid.appendChild(btn);
+    });
+
+    const reactBtn = document.getElementById('react-btn');
+    const drawer = document.getElementById('reaction-drawer');
+    const overlay = document.getElementById('overlay');
+    function toggleDrawer() { drawer.classList.toggle('open'); overlay.classList.toggle('active'); }
+    reactBtn.addEventListener('click', toggleDrawer);
+    overlay.addEventListener('click', toggleDrawer);
+
+    /* 摄像头预览可隐藏: 点击 cam-preview 在 [完整预览] 与 [缩为 44px 圆形图标] 间切换.
+       面部追踪仍在后台运行, 仅画面收起. */
+    const camPreviewEl = document.getElementById('cam-preview');
+    camPreviewEl.addEventListener('click', () => {
+        if (!camPreviewEl.classList.contains('visible')) return;
+        camPreviewEl.classList.toggle('minimized');
+    });
+
+    /* =========================================
+       触摸捏揉 (Pointer Drag → 抓取 spring 控制点)
+       ========================================= */
+    const svgEl = document.getElementById('face-svg');
+
+    function clientToSvg(clientX, clientY) {
+        const rect = svgEl.getBoundingClientRect();
+        return {
+            x: ((clientX - rect.left) / rect.width)  * 100,
+            y: ((clientY - rect.top)  / rect.height) * 80
+        };
+    }
+
+    /* =========================================
+       橡皮筋阻尼: 中心区域 1:1 跟随手指,
+       越接近屏幕边缘, 阻尼越大 (类 iOS rubber-band)
+       ========================================= */
+    function rubberDamp(offset, limit) {
+        const a = Math.abs(offset);
+        if (limit <= 1) return 0;
+        // 30% 的范围内完全无阻尼, 保持手感跟随
+        const linearZone = limit * 0.30;
+        if (a <= linearZone) return offset;
+        // 进入阻尼区: 用 tanh 平滑收敛到 limit
+        const beyond = a - linearZone;
+        const remaining = limit - linearZone;
+        const damped = remaining * Math.tanh(beyond / remaining);
+        return Math.sign(offset) * (linearZone + damped);
+    }
+
+    function clientToSvgDamped(clientX, clientY) {
+        const rect = svgEl.getBoundingClientRect();
+        const svgCX = rect.left + rect.width  / 2;
+        const svgCY = rect.top  + rect.height / 2;
+        const W = window.innerWidth, H = window.innerHeight;
+
+        // 手指相对 SVG 中心的位移
+        const dxF = clientX - svgCX;
+        const dyF = clientY - svgCY;
+
+        // 各方向的"屏幕极限" (距最近屏幕边的可用空间, 留一点边距防贴边)
+        const margin = 24;
+        const limX = Math.max(60, (dxF >= 0 ? W - svgCX : svgCX) - margin);
+        const limY = Math.max(60, (dyF >= 0 ? H - svgCY : svgCY) - margin);
+
+        // 阻尼后的有效位移
+        const dxE = rubberDamp(dxF, limX);
+        const dyE = rubberDamp(dyF, limY);
+
+        // 回到屏幕坐标, 再换算到 SVG 单位
+        const dCX = svgCX + dxE;
+        const dCY = svgCY + dyE;
+        return {
+            x: (dCX - rect.left) / rect.width  * 100,
+            y: (dCY - rect.top)  / rect.height * 80
+        };
+    }
+
+    function pickFeature(x, y) {
+        // 眼睛: 圆形命中区
+        const eyes = [
+            { type: 'eye-L', cx: 30, cy: 25 },
+            { type: 'eye-R', cx: 70, cy: 25 },
+        ];
+        for (const e of eyes) {
+            const dx = x - e.cx, dy = y - e.cy;
+            if (dx*dx + dy*dy <= 22*22) return e.type;
+        }
+        // 嘴: 找 3 个贝塞尔控制点中最近且在阈值内的
+        const m = sMouth.map(s => s.val);
+        const points = [
+            { type: 'mouth-CL', x: m[0], y: m[1] },
+            { type: 'mouth-CC', x: m[2], y: m[3] },
+            { type: 'mouth-CR', x: m[4], y: m[5] },
+        ].map(p => ({...p, d: Math.hypot(x - p.x, y - p.y)}));
+        points.sort((a, b) => a.d - b.d);
+        if (points[0].d < 22) return points[0].type;
+        return null;
+    }
+
+    const PINCH_TEXTS = ['Eek!', 'Boing!', 'Hey!', 'Squish~', 'Boop!', 'Stop it!', 'Oof.', 'Ow~'];
+    let drag = null;
+    let lastPinchText = 0;
+    // 两只手的虚拟拖拽状态 (键: 0 / 1, 跟 hand-svg-0/1 对齐)
+    const handDrags = { 0: null, 1: null };
+
+    function freezeFor(type, freeze) {
+        switch (type) {
+            case 'eye-L':    [0,1,2,3].forEach(i => sLeft[i].frozen = freeze); break;
+            case 'eye-R':    [0,1,2,3].forEach(i => sRight[i].frozen = freeze); break;
+            case 'mouth-CL': sMouth[0].frozen = freeze; sMouth[1].frozen = freeze; break;
+            case 'mouth-CC': sMouth[2].frozen = freeze; sMouth[3].frozen = freeze; break;
+            case 'mouth-CR': sMouth[4].frozen = freeze; sMouth[5].frozen = freeze; break;
+        }
+    }
+    function bounceFor(type) {
+        switch (type) {
+            case 'eye-L':    sLeft.forEach(s => s.bounce()); break;
+            case 'eye-R':    sRight.forEach(s => s.bounce()); break;
+            case 'mouth-CL': sMouth[0].bounce(); sMouth[1].bounce(); break;
+            case 'mouth-CC': sMouth[2].bounce(); sMouth[3].bounce(); break;
+            case 'mouth-CR': sMouth[4].bounce(); sMouth[5].bounce(); break;
+        }
+    }
+    function applyDragToType(type, x, y) {
+        switch (type) {
+            case 'eye-L': {
+                const dx = x - 30, dy = y - 25;
+                // 不再硬截到 35 单位, 让眼睛能跟手指拖到屏幕任意位置
+                const len = Math.hypot(dx, dy);
+                const squish = Math.min(1.0, len / 90);
+                sLeft[0].val = dx;
+                sLeft[1].val = dy;
+                sLeft[2].val = Math.max(0.45, 1 - squish * 0.55);
+                sLeft[3].val = Math.max(0.45, 1 - squish * 0.55);
+                break;
+            }
+            case 'eye-R': {
+                const dx = x - 70, dy = y - 25;
+                const len = Math.hypot(dx, dy);
+                const squish = Math.min(1.0, len / 90);
+                sRight[0].val = dx;
+                sRight[1].val = dy;
+                sRight[2].val = Math.max(0.45, 1 - squish * 0.55);
+                sRight[3].val = Math.max(0.45, 1 - squish * 0.55);
+                break;
+            }
+            // 嘴部三个控制点: 解除原来的小范围 clamp, 允许拖到屏幕任意位置
+            // (clientToSvgDamped 已经在屏幕边附近加上了阻尼, 不会真的脱出屏幕)
+            case 'mouth-CL':
+                sMouth[0].val = x;
+                sMouth[1].val = y; break;
+            case 'mouth-CC':
+                sMouth[2].val = x;
+                sMouth[3].val = y; break;
+            case 'mouth-CR':
+                sMouth[4].val = x;
+                sMouth[5].val = y; break;
+        }
+    }
+    function applyDrag(x, y) {
+        if (!drag) return;
+        applyDragToType(drag.type, x, y);
+    }
+
+    // 是否任意一只手或手指正在抓握 (用来切换 grabbing 视觉态)
+    function anyGrabActive() {
+        return !!(drag || handDrags[0] || handDrags[1]);
+    }
+    function syncGrabbingClass() {
+        document.body.classList.toggle('grabbing', anyGrabActive());
+    }
+    function maybePinchBubble() {
+        if (Date.now() - lastPinchText > 1500) {
+            lastPinchText = Date.now();
+            const txt = PINCH_TEXTS[Math.floor(Math.random() * PINCH_TEXTS.length)];
+            const bubble = document.querySelector('.speech-bubble');
+            const textEl2 = document.getElementById('speech-text');
+            bubble.classList.remove('bubble-pop');
+            void bubble.offsetWidth;
+            textEl2.innerText = txt;
+            bubble.classList.add('bubble-pop');
+        }
+    }
+
+    /* =========================================
+       手势虚拟拖拽 API: 给 MediaPipe HandLandmarker 调用
+       手势捏合 (拇指 + 食指) 相当于一次远程的 pointerdown / move / up
+       ========================================= */
+    // 手势用更宽松的命中检测 (手在空中难精准对准, 半径放大)
+    function pickFeatureLoose(x, y) {
+        let best = null, bestD = Infinity;
+        const eyes = [
+            { type: 'eye-L', cx: 30 + sLeft[0].val,  cy: 25 + sLeft[1].val  },
+            { type: 'eye-R', cx: 70 + sRight[0].val, cy: 25 + sRight[1].val },
+        ];
+        for (const e of eyes) {
+            const d = Math.hypot(x - e.cx, y - e.cy);
+            if (d < 36 && d < bestD) { best = e.type; bestD = d; }
+        }
+        const m = sMouth.map(s => s.val);
+        const mp = [
+            { type: 'mouth-CL', x: m[0], y: m[1] },
+            { type: 'mouth-CC', x: m[2], y: m[3] },
+            { type: 'mouth-CR', x: m[4], y: m[5] },
+        ];
+        for (const p of mp) {
+            const d = Math.hypot(x - p.x, y - p.y);
+            if (d < 32 && d < bestD) { best = p.type; bestD = d; }
+        }
+        return best;
+    }
+    window.handPinchStart = function (handKey, clientX, clientY) {
+        if (handDrags[handKey]) return false;          // 已经抓着别松手别重入
+        const raw = clientToSvg(clientX, clientY);
+        const type = pickFeatureLoose(raw.x, raw.y);
+        if (!type) return false;
+        // 同一个特征如果手指 (touch drag) 在抓, 让位
+        if (drag && drag.type === type) return false;
+        // 同一个特征不能两只手同时抓
+        for (const k in handDrags) if (handDrags[k] && handDrags[k].type === type) return false;
+        handDrags[handKey] = { type };
+        freezeFor(type, true);
+        syncGrabbingClass();
+        const d = clientToSvgDamped(clientX, clientY);
+        applyDragToType(type, d.x, d.y);
+        return true;
+    };
+    window.handPinchMove = function (handKey, clientX, clientY) {
+        const hd = handDrags[handKey];
+        if (!hd) return;
+        const d = clientToSvgDamped(clientX, clientY);
+        applyDragToType(hd.type, d.x, d.y);
+    };
+    window.handPinchEnd = function (handKey) {
+        const hd = handDrags[handKey];
+        if (!hd) return;
+        freezeFor(hd.type, false);
+        bounceFor(hd.type);
+        handDrags[handKey] = null;
+        syncGrabbingClass();
+        maybePinchBubble();
+    };
+    window.handPinchAbortAll = function () {
+        for (const k in handDrags) {
+            if (handDrags[k]) {
+                freezeFor(handDrags[k].type, false);
+                bounceFor(handDrags[k].type);
+                handDrags[k] = null;
+            }
+        }
+        syncGrabbingClass();
+    };
+
+    svgEl.addEventListener('pointerdown', (e) => {
+        // 命中检测用未阻尼的坐标 (手指落点 = SVG 内的视觉坐标)
+        const raw = clientToSvg(e.clientX, e.clientY);
+        const type = pickFeature(raw.x, raw.y);
+        if (!type) return;
+        drag = { type, id: e.pointerId };
+        freezeFor(type, true);
+        syncGrabbingClass();
+        try { svgEl.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+        // 拖动用阻尼后的坐标
+        const d = clientToSvgDamped(e.clientX, e.clientY);
+        applyDrag(d.x, d.y);
+    });
+    svgEl.addEventListener('pointermove', (e) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        // pointer capture 保证手指出 SVG 边界后事件仍然继续
+        const {x, y} = clientToSvgDamped(e.clientX, e.clientY);
+        applyDrag(x, y);
+    });
+    function endDrag(e) {
+        if (!drag || (e && e.pointerId !== drag.id)) return;
+        freezeFor(drag.type, false);
+        bounceFor(drag.type);
+        maybePinchBubble();
+        try { svgEl.releasePointerCapture(drag.id); } catch (_) {}
+        drag = null;
+        syncGrabbingClass();
+    }
+    svgEl.addEventListener('pointerup', endDrag);
+    svgEl.addEventListener('pointercancel', endDrag);
+    window.addEventListener('pointerup', endDrag);
+</script>
+
+<!-- =========================================
+     人脸追踪 (MediaPipe + One-Euro + 基线校准)
+     ========================================= -->
+<script type="module">
+    import { FaceLandmarker, HandLandmarker, FilesetResolver }
+        from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+    const trackBtn   = document.getElementById('face-track-btn');
+    const trackLabel = document.getElementById('face-track-label');
+    const camPreview = document.getElementById('cam-preview');
+    const videoEl    = document.getElementById('cam-video');
+    const textEl     = document.getElementById('speech-text');
+
+    let faceLandmarker = null;
+    let handLandmarker = null;
+    let modelLoaded = false;
+    let lastVideoTime = -1;
+    let rafId = null;
+    let lastMood = '';
+    let phase = 'idle';
+    let warmupUntil = 0;
+    let calibUntil  = 0;
+    const calibSamples = {};
+    const baseline = {};
+    window.faceTracking = false;
+
+    /* =========================================
+       手部跟踪状态: cam 预览里画骨架 + 主屏幕上的两只米老鼠手套 SVG
+       ========================================= */
+    const camCanvas = document.getElementById('cam-canvas');
+    const camCtx    = camCanvas.getContext('2d');
+    const handSvgs = [
+        document.getElementById('hand-svg-0'),
+        document.getElementById('hand-svg-1'),
+    ];
+    // 提前抓好每只手的所有 path, 后续每帧只改 d 属性
+    const handParts = handSvgs.map(svg => ({
+        palm:       svg.querySelector('.palm-shape'),
+        thumbOut:   svg.querySelector('.thumb-outline'),
+        indexOut:   svg.querySelector('.index-outline'),
+        middleOut:  svg.querySelector('.middle-outline'),
+        ringOut:    svg.querySelector('.ring-outline'),
+        pinkyOut:   svg.querySelector('.pinky-outline'),
+        thumbFill:  svg.querySelector('.thumb-fill'),
+        indexFill:  svg.querySelector('.index-fill'),
+        middleFill: svg.querySelector('.middle-fill'),
+        ringFill:   svg.querySelector('.ring-fill'),
+        pinkyFill:  svg.querySelector('.pinky-fill'),
+        wristGlow:  svg.querySelector('.wrist-glow'),   // Vision OS 光晕椭圆
+    }));
+    // 每只手的腕部渐隐渐变元素 (在 <defs> 中)
+    const handFadeGrads = [
+        document.getElementById('hfg-0'),
+        document.getElementById('hfg-1'),
+    ];
+    const handPinchState = [false, false];   // hysteresis 的当前 pinch 态
+    const HAND_CONNECTIONS = [
+        [0,1],[1,2],[2,3],[3,4],            // 拇指
+        [0,5],[5,6],[6,7],[7,8],            // 食指
+        [9,10],[10,11],[11,12],             // 中指
+        [13,14],[14,15],[15,16],            // 无名指
+        [0,17],[17,18],[18,19],[19,20],     // 小指
+        [5,9],[9,13],[13,17],               // 手掌
+    ];
+
+    /* One-Euro Filter (Casiez et al. 2012)
+       静止时强滤波(去抖动), 快速运动时弱滤波(保留响应速度) */
+    class OneEuro {
+        constructor(minCutoff = 1.5, beta = 0.02, dCutoff = 1.0) {
+            this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+            this.x = null; this.dx = 0; this.lastT = null;
+        }
+        alpha(cutoff, dt) {
+            const tau = 1 / (2 * Math.PI * cutoff);
+            return 1 / (1 + tau / dt);
+        }
+        filter(value, tMs) {
+            if (this.x === null) { this.x = value; this.lastT = tMs; return value; }
+            const dt = Math.max(0.001, (tMs - this.lastT) / 1000);
+            this.lastT = tMs;
+            const dxRaw = (value - this.x) / dt;
+            const aD = this.alpha(this.dCutoff, dt);
+            this.dx = aD * dxRaw + (1 - aD) * this.dx;
+            const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
+            const a = this.alpha(cutoff, dt);
+            this.x = a * value + (1 - a) * this.x;
+            return this.x;
+        }
+        reset() { this.x = null; this.dx = 0; this.lastT = null; }
+    }
+    // 每个 blendshape 一个独立滤波器, 参数按抖动特性微调
+    const FILTERS = {
+        mouthSmileLeft:  new OneEuro(1.5, 0.04),
+        mouthSmileRight: new OneEuro(1.5, 0.04),
+        mouthFrownLeft:  new OneEuro(1.5, 0.04),
+        mouthFrownRight: new OneEuro(1.5, 0.04),
+        jawOpen:         new OneEuro(2.5, 0.08),  // 张嘴变化快, 给更高响应
+        mouthPucker:     new OneEuro(1.5, 0.04),
+        mouthFunnel:     new OneEuro(1.5, 0.04),
+        eyeBlinkLeft:    new OneEuro(4.0, 0.20),  // 眨眼极快, 几乎不滤
+        eyeBlinkRight:   new OneEuro(4.0, 0.20),
+        eyeLookOutLeft:  new OneEuro(1.0, 0.05),  // 眼神信号最抖, 重滤波
+        eyeLookInLeft:   new OneEuro(1.0, 0.05),
+        eyeLookOutRight: new OneEuro(1.0, 0.05),
+        eyeLookInRight:  new OneEuro(1.0, 0.05),
+        eyeLookUpLeft:   new OneEuro(1.0, 0.05),
+        eyeLookUpRight:  new OneEuro(1.0, 0.05),
+        eyeLookDownLeft: new OneEuro(1.0, 0.05),
+        eyeLookDownRight:new OneEuro(1.0, 0.05),
+    };
+    // 实测每个 blendshape 几乎到不了 1.0, 重映射放大手感
+    const TYPICAL_MAX = {
+        mouthSmileLeft: 0.65, mouthSmileRight: 0.65,
+        mouthFrownLeft: 0.55, mouthFrownRight: 0.55,
+        jawOpen: 0.55,
+        mouthPucker: 0.70,
+        mouthFunnel: 0.60,
+        eyeBlinkLeft: 0.85, eyeBlinkRight: 0.85,
+        eyeLookOutLeft: 0.55, eyeLookInLeft: 0.55,
+        eyeLookOutRight: 0.55, eyeLookInRight: 0.55,
+        eyeLookUpLeft: 0.50, eyeLookUpRight: 0.50,
+        eyeLookDownLeft: 0.50, eyeLookDownRight: 0.50,
+    };
+
+    // 每只手 21 个关节, 每个关节独立 X/Y 的 One-Euro 滤波 -> 五根手指不抖
+    function makeHandLmFilters() {
+        return Array.from({ length: 21 }, () => ({
+            x: new OneEuro(2.5, 0.04),
+            y: new OneEuro(2.5, 0.04),
+        }));
+    }
+    const handLmFilters = [makeHandLmFilters(), makeHandLmFilters()];
+    function resetHandLm(i) {
+        handLmFilters[i].forEach(f => { f.x.reset(); f.y.reset(); });
+    }
+
+    function drawHandSkeleton(landmarks) {
+        const w = camCanvas.width, h = camCanvas.height;
+        camCtx.lineWidth = 3;
+        camCtx.lineCap = 'round';
+        camCtx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+        camCtx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        camCtx.shadowBlur = 3;
+        for (const [a, b] of HAND_CONNECTIONS) {
+            const la = landmarks[a], lb = landmarks[b];
+            camCtx.beginPath();
+            camCtx.moveTo(la.x * w, la.y * h);
+            camCtx.lineTo(lb.x * w, lb.y * h);
+            camCtx.stroke();
+        }
+        camCtx.shadowBlur = 0;
+        camCtx.fillStyle = '#FF3B30';
+        for (let i = 0; i < landmarks.length; i++) {
+            const p = landmarks[i];
+            const r = (i === 4 || i === 8 || i === 12 || i === 16 || i === 20) ? 4 : 2.5;
+            camCtx.beginPath();
+            camCtx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+            camCtx.fill();
+        }
+    }
+
+    // 21 个 landmark -> 屏幕像素 (selfie 镜像), 再过 One-Euro
+    function smoothToScreen(handIdx, lm, tMs) {
+        const W = window.innerWidth, H = window.innerHeight;
+        const filt = handLmFilters[handIdx];
+        const out = new Array(21);
+        for (let i = 0; i < 21; i++) {
+            const rawX = (1 - lm[i].x) * W;
+            const rawY = lm[i].y * H;
+            out[i] = {
+                x: filt[i].x.filter(rawX, tMs),
+                y: filt[i].y.filter(rawY, tMs),
+            };
+        }
+        return out;
+    }
+
+
+    /* Catmull-Rom 转三次贝塞尔串
+       将 n 个锚点连成切线连续的平滑曲线 (每个锚点处 C1 连续, 无折角).
+       tension: 1.0 = 标准 Catmull-Rom; <1 更紧绷接近直线; >1 更宽松易过冲.
+       端点采用 clamp 模式 (而非 wrap), 起末点切线对齐相邻段. */
+    function smoothOpen(pts, tension = 1.0) {
+        const n = pts.length;
+        if (n < 2) return '';
+        if (n === 2) return `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)} ${pts[1].y.toFixed(1)}`;
+        const at = (i) => pts[Math.max(0, Math.min(n - 1, i))];
+        const k = tension / 6;
+        let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+        for (let i = 0; i < n - 1; i++) {
+            const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+            const c1x = p1.x + (p2.x - p0.x) * k;
+            const c1y = p1.y + (p2.y - p0.y) * k;
+            const c2x = p2.x - (p3.x - p1.x) * k;
+            const c2y = p2.y - (p3.y - p1.y) * k;
+            d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+        }
+        return d;
+    }
+    /* 闭合版本: 索引环绕, 整圈切线连续 */
+    function smoothClosed(pts, tension = 1.0) {
+        const n = pts.length;
+        if (n < 3) return '';
+        const at = (i) => pts[((i % n) + n) % n];
+        const k = tension / 6;
+        let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+        for (let i = 0; i < n; i++) {
+            const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+            const c1x = p1.x + (p2.x - p0.x) * k;
+            const c1y = p1.y + (p2.y - p0.y) * k;
+            const c2x = p2.x - (p3.x - p1.x) * k;
+            const c2y = p2.y - (p3.y - p1.y) * k;
+            d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+        }
+        return d + ' Z';
+    }
+
+    function renderHandSVG(handIdx, scrPts) {
+        const parts = handParts[handIdx];
+        const wrist = scrPts[0];
+
+        /* ── 1. 比例尺 ──────────────────────────────────────────────────── */
+        const palmSpan = Math.hypot(
+            scrPts[5].x - scrPts[17].x,
+            scrPts[5].y - scrPts[17].y
+        );
+        const outW  = Math.min(50, Math.max(10, palmSpan / 3.4));
+        // 黑描边已被透明化, 白填充直接用完整宽度作为可见的手指主体
+        const fillW = outW;
+
+        /* ── 2. 一笔极简: Catmull-Rom 平滑穿过腕点 + 4 个关节 ──────────
+           5 个锚点 (wrist, MCP, PIP, DIP, tip) 通过 Catmull-Rom 转成 4 段
+           三次贝塞尔, 每个关节切线连续, 弯折处自然圆润, 不再有可见折角.
+           ──────────────────────────────────────────────────────────────── */
+        function fingerSmooth(mcpI, pipI, dipI, tipI) {
+            return smoothOpen([
+                wrist,
+                scrPts[mcpI],
+                scrPts[pipI],
+                scrPts[dipI],
+                scrPts[tipI],
+            ], 1.0);
+        }
+        const thumbD  = fingerSmooth(1,  2,  3,  4);
+        const indexD  = fingerSmooth(5,  6,  7,  8);
+        const middleD = fingerSmooth(9,  10, 11, 12);
+        const ringD   = fingerSmooth(13, 14, 15, 16);
+        const pinkyD  = fingerSmooth(17, 18, 19, 20);
+
+        function setFinger(out, fill, d) {
+            out.setAttribute('d', d);  out.setAttribute('stroke-width', outW);
+            fill.setAttribute('d', d); fill.setAttribute('stroke-width', fillW);
+        }
+        setFinger(parts.thumbOut,  parts.thumbFill,  thumbD);
+        setFinger(parts.indexOut,  parts.indexFill,  indexD);
+        setFinger(parts.middleOut, parts.middleFill, middleD);
+        setFinger(parts.ringOut,   parts.ringFill,   ringD);
+        setFinger(parts.pinkyOut,  parts.pinkyFill,  pinkyD);
+
+        /* ── 3. 手掌: 13 锚点闭合 Catmull-Rom ────────────────────────────
+           所有指间蹼都是凹陷形:
+              · 虎口蹼 (拇-食): 凹陷较深 (-0.08), 锚点偏食指侧 0.55 让弯折位置上移
+              · 食-中 / 中-无 / 无-小: 浅凹 (-0.06), 让相邻手指视觉分离
+           拇侧 + 小指侧各加 1 合成"厚度锚点": 段中点沿"远离掌心质心"方向
+           外推 12% 掌宽, 让手侧缘有实感.
+           ──────────────────────────────────────────────────────────────── */
+        // 加权中点 + 凸凹偏移; biasToB=0.5 标准中点, 偏 B 端取值更大
+        function webMid(ia, ib, t, biasToB = 0.5) {
+            const mx = scrPts[ia].x * (1 - biasToB) + scrPts[ib].x * biasToB;
+            const my = scrPts[ia].y * (1 - biasToB) + scrPts[ib].y * biasToB;
+            return {
+                x: mx + (mx - wrist.x) * t,
+                y: my + (my - wrist.y) * t,
+            };
+        }
+        // 手侧厚度: 段中点沿"MCP 质心 → 中点"方向外推, 让侧缘鼓出
+        const mcpCx = (scrPts[5].x + scrPts[9].x + scrPts[13].x + scrPts[17].x) * 0.25;
+        const mcpCy = (scrPts[5].y + scrPts[9].y + scrPts[13].y + scrPts[17].y) * 0.25;
+        function sideEdge(ia, ib, pad) {
+            const mx = (scrPts[ia].x + scrPts[ib].x) * 0.5;
+            const my = (scrPts[ia].y + scrPts[ib].y) * 0.5;
+            const dx = mx - mcpCx, dy = my - mcpCy;
+            const len = Math.hypot(dx, dy) || 1;
+            return {
+                x: mx + (dx / len) * palmSpan * pad,
+                y: my + (dy / len) * palmSpan * pad,
+            };
+        }
+        const palmPts = [
+            scrPts[0],                            // 0: 腕
+            sideEdge(0, 1, 0.12),                 // 1: 拇侧厚度
+            scrPts[1],                            // 2: 拇指 CMC
+            scrPts[2],                            // 3: 拇指 MCP
+            webMid(2, 5, -0.08, 0.55),            // 4: 虎口蹼 (凹陷, 偏食指侧)
+            scrPts[5],                            // 5: 食指 MCP
+            webMid(5, 9, -0.06),                  // 6: 食-中蹼 (V 形浅凹)
+            scrPts[9],                            // 7: 中指 MCP
+            webMid(9, 13, -0.06),                 // 8: 中-无蹼 (V 形浅凹)
+            scrPts[13],                           // 9: 无名 MCP
+            webMid(13, 17, -0.06),                // 10: 无-小蹼 (V 形浅凹)
+            scrPts[17],                           // 11: 小指 MCP
+            sideEdge(17, 0, 0.12),                // 12: 小指侧厚度
+        ];
+        parts.palm.setAttribute('d', smoothClosed(palmPts, 1.0));
+        parts.palm.setAttribute('stroke', 'none');
+
+        /* ── 4. 方向向量 ──────────────────────────────────────────────── */
+        const midMCP = scrPts[9];
+        const upDx = midMCP.x - wrist.x, upDy = midMCP.y - wrist.y;
+        const upLen = Math.hypot(upDx, upDy) || 1;
+        const nx = upDx / upLen, ny = upDy / upLen;
+
+        /* ── 5. Vision OS 腕部光晕 ─────────────────────────────────────
+           用背景色模糊椭圆覆盖腕点以下, 配合不透明渐变共同形成「柔焦消融」:
+             · 椭圆中心: 腕往手臂方向偏移 0.25× 手长
+             · rx (横向) ≈ 手掌宽度 × 0.65
+             · ry (纵向) ≈ 手长 × 0.60
+             · 随手朝向旋转
+           ──────────────────────────────────────────────────────────────── */
+        const glow = parts.wristGlow;
+        if (glow) {
+            const palmW = Math.hypot(
+                scrPts[1].x - scrPts[17].x, scrPts[1].y - scrPts[17].y
+            );
+            const gcx = wrist.x - nx * upLen * 0.25;
+            const gcy = wrist.y - ny * upLen * 0.25;
+            glow.setAttribute('cx', gcx.toFixed(1));
+            glow.setAttribute('cy', gcy.toFixed(1));
+            glow.setAttribute('rx', (palmW * 0.65).toFixed(1));
+            glow.setAttribute('ry', (upLen * 0.60).toFixed(1));
+            const angleDeg = (Math.atan2(upDy, upDx) * 180 / Math.PI - 90).toFixed(2);
+            glow.setAttribute('transform',
+                `rotate(${angleDeg} ${gcx.toFixed(1)} ${gcy.toFixed(1)})`);
+        }
+
+        /* ── 6. 不透明渐变端点 ──────────────────────────────────────────── */
+        const grad = handFadeGrads[handIdx];
+        if (grad) {
+            grad.setAttribute('x1', (wrist.x - nx * upLen * 0.7).toFixed(1));
+            grad.setAttribute('y1', (wrist.y - ny * upLen * 0.7).toFixed(1));
+            grad.setAttribute('x2', (wrist.x + nx * upLen * 0.45).toFixed(1));
+            grad.setAttribute('y2', (wrist.y + ny * upLen * 0.45).toFixed(1));
+        }
+    }
+
+    /**
+     * 把 HandLandmarker 一帧的结果驱动到:
+     *   - cam-canvas 上的小骨架可视化
+     *   - 主屏幕上的两只 SVG 手 (五指 + 手掌 + 关节)
+     *   - 通过 window.handPinchStart/Move/End 远程触发 SVG 拖拽
+     */
+    function processHands(handResult, now) {
+        camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+
+        const hands = handResult && handResult.landmarks ? handResult.landmarks : [];
+        const detected = new Set();
+        const slotCount = Math.min(2, hands.length);
+
+        for (let i = 0; i < slotCount; i++) {
+            const lm = hands[i];
+            if (!lm || lm.length < 21) continue;
+            detected.add(i);
+
+            // 1) cam 预览小骨架 (确认追踪在工作)
+            drawHandSkeleton(lm);
+
+            // 2) 21 个 landmark -> 屏幕像素, One-Euro 平滑
+            const scrPts = smoothToScreen(i, lm, now);
+
+            // 3) 画 SVG 手
+            handSvgs[i].classList.add('visible');
+            renderHandSVG(i, scrPts);
+
+            // 4) 算捏合: 用平滑后的拇指尖(4) + 食指尖(8), 按手大小归一化
+            const thumbTip = scrPts[4], indexTip = scrPts[8];
+            const wrist = scrPts[0], midMCP = scrPts[9];
+            const handSize = Math.hypot(midMCP.x - wrist.x, midMCP.y - wrist.y);
+            const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+            const pinchRatio = pinchDist / Math.max(1, handSize);
+
+            const sx = (thumbTip.x + indexTip.x) / 2;
+            const sy = (thumbTip.y + indexTip.y) / 2;
+
+            // 5) 双阈值 hysteresis: 进入捏合 < 0.45, 离开 > 0.68
+            const was = handPinchState[i];
+            let cur = was;
+            if (!was && pinchRatio < 0.45) cur = true;
+            if (was  && pinchRatio > 0.68) cur = false;
+            handPinchState[i] = cur;
+            handSvgs[i].classList.toggle('pinching', cur);
+
+            // 6) 桥接到非模块脚本里的虚拟拖拽 API
+            if (!was && cur) {
+                window.handPinchStart && window.handPinchStart(i, sx, sy);
+            } else if (was && !cur) {
+                window.handPinchEnd && window.handPinchEnd(i);
+            } else if (cur) {
+                window.handPinchMove && window.handPinchMove(i, sx, sy);
+            }
+        }
+
+        // 没检测到的那只手: 隐藏 SVG, 强制松开任何还挂着的捏
+        for (let i = 0; i < 2; i++) {
+            if (!detected.has(i)) {
+                handSvgs[i].classList.remove('visible', 'pinching');
+                if (handPinchState[i]) {
+                    handPinchState[i] = false;
+                    window.handPinchEnd && window.handPinchEnd(i);
+                }
+                resetHandLm(i);
+            }
+        }
+    }
+
+    // 归一化: 滤波 → 减基线 → 重映射 → 死区
+    function norm(name, raw, tMs) {
+        const filtered = FILTERS[name] ? FILTERS[name].filter(raw, tMs) : raw;
+        const base = baseline[name] || 0;
+        let v = filtered - base;
+        const range = (TYPICAL_MAX[name] || 1.0) - base;
+        v = v / Math.max(0.1, range);
+        if (v < 0.04) v = 0;        // 死区: 抑制残留漂移
+        if (v > 1) v = 1;
+        return v;
+    }
+
+    async function loadModel() {
+        if (modelLoaded) return;
+        trackBtn.classList.add('loading');
+        trackLabel.textContent = 'Loading…';
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+        // 两个模型并行下载, 不让 hand 卡 face 启动
+        [faceLandmarker, handLandmarker] = await Promise.all([
+            FaceLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                    delegate: "GPU"
+                },
+                outputFaceBlendshapes: true,
+                outputFacialTransformationMatrixes: true,
+                runningMode: "VIDEO",
+                numFaces: 1
+            }),
+            HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 2
+            })
+        ]);
+        modelLoaded = true;
+        trackBtn.classList.remove('loading');
+    }
+
+    async function startTracking() {
+        try {
+            await loadModel();
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 320, height: 240, facingMode: 'user' },
+                audio: false
+            });
+            videoEl.srcObject = stream;
+            await videoEl.play();
+
+            Object.values(FILTERS).forEach(f => f.reset());
+            for (const k in baseline) delete baseline[k];
+            for (const k in calibSamples) delete calibSamples[k];
+
+            window.faceTracking = true;
+            document.body.classList.add('face-tracking-active');
+            trackBtn.classList.add('active');
+            camPreview.classList.add('visible');
+
+            phase = 'warmup';
+            warmupUntil = performance.now() + 400;
+            calibUntil  = warmupUntil + 1500;
+            trackLabel.textContent = 'Hold still…';
+            showBubble('Hold still…');
+            camPreview.classList.add('calibrating');
+            trackBtn.classList.add('calibrating');
+            if (window.startHeadPoseCalib) window.startHeadPoseCalib();
+            detectLoop();
+        } catch (err) {
+            console.error('Camera/Model error:', err);
+            trackBtn.classList.remove('loading', 'calibrating');
+            trackLabel.textContent = 'Track Face';
+            alert('无法启动摄像头: ' + err.message);
+        }
+    }
+
+    function stopTracking() {
+        window.faceTracking = false;
+        phase = 'idle';
+        document.body.classList.remove('face-tracking-active');
+        trackBtn.classList.remove('active', 'calibrating');
+        trackLabel.textContent = 'Track Face';
+        camPreview.classList.remove('visible', 'calibrating', 'minimized');
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = null;
+        if (videoEl.srcObject) {
+            videoEl.srcObject.getTracks().forEach(t => t.stop());
+            videoEl.srcObject = null;
+        }
+        const n = states.neutral;
+        for (let i=0; i<6; i++) sMouth[i].target = n.p[i];
+        for (let i=0; i<5; i++) { sLeft[i].target = n.l[i]; sRight[i].target = n.r[i]; }
+        if (window.resetHeadPose) window.resetHeadPose();
+
+        // 清掉手部跟踪状态
+        if (window.handPinchAbortAll) window.handPinchAbortAll();
+        handPinchState[0] = handPinchState[1] = false;
+        resetHandLm(0); resetHandLm(1);
+        handSvgs.forEach(s => s.classList.remove('visible', 'pinching'));
+        camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+    }
+
+    function showBubble(txt) {
+        const bubble = document.querySelector('.speech-bubble');
+        bubble.classList.remove('bubble-pop');
+        void bubble.offsetWidth;
+        textEl.innerText = txt;
+        bubble.classList.add('bubble-pop');
+    }
+
+    function detectLoop() {
+        if (!window.faceTracking) return;
+        const now = performance.now();
+        if (videoEl.readyState >= 2 && videoEl.currentTime !== lastVideoTime) {
+            lastVideoTime = videoEl.currentTime;
+            const result = faceLandmarker.detectForVideo(videoEl, now);
+
+            // 头部 3D 朝向: warmup / calibrating / tracking 全程都喂数据
+            // (calibrating 时只收样本算基线; tracking 时驱动 3D 旋转)
+            if (result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0
+                && window.applyHeadPoseFromMatrix) {
+                window.applyHeadPoseFromMatrix(result.facialTransformationMatrixes[0].data);
+            }
+
+            if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
+                const cats = result.faceBlendshapes[0].categories;
+
+                if (phase === 'warmup' && now >= warmupUntil) phase = 'calibrating';
+
+                if (phase === 'calibrating') {
+                    collectCalibration(cats);
+                    if (now >= calibUntil) {
+                        finalizeCalibration();
+                        if (window.endHeadPoseCalib) window.endHeadPoseCalib();
+                        phase = 'tracking';
+                        camPreview.classList.remove('calibrating');
+                        trackBtn.classList.remove('calibrating');
+                        trackLabel.textContent = 'Live';
+                        showBubble('Ready!');
+                        lastMood = 'Ready!';
+                    }
+                } else if (phase === 'tracking') {
+                    applyBlendshapes(cats, now);
+                }
+            }
+
+            // 手势跟踪: 跟人脸吃同一帧视频, 同一个时间戳
+            // (校准阶段也跑, 用户可以一边校准一边玩, 不过捏合只在 tracking 阶段生效)
+            if (handLandmarker) {
+                try {
+                    const handResult = handLandmarker.detectForVideo(videoEl, now);
+                    if (phase === 'tracking') {
+                        processHands(handResult, now);
+                    } else {
+                        // 校准期间只画骨架, 不触发捏合
+                        camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+                        const hands = handResult.landmarks || [];
+                        for (let i = 0; i < Math.min(2, hands.length); i++) {
+                            if (hands[i] && hands[i].length >= 21) drawHandSkeleton(hands[i]);
+                        }
+                    }
+                } catch (_) { /* MediaPipe 偶发超时, 吞掉别中断 detectLoop */ }
+            }
+        }
+        rafId = requestAnimationFrame(detectLoop);
+    }
+
+    function collectCalibration(cats) {
+        for (const c of cats) {
+            if (!(c.categoryName in FILTERS)) continue;
+            (calibSamples[c.categoryName] ||= []).push(c.score);
+        }
+    }
+    function finalizeCalibration() {
+        for (const name in calibSamples) {
+            const arr = calibSamples[name];
+            arr.sort((a, b) => a - b);
+            const median = arr[Math.floor(arr.length / 2)];
+            baseline[name] = Math.min(median, 0.30);  // 安全上限, 防离谱基线
+        }
+    }
+
+    function applyBlendshapes(cats, tMs) {
+        const raw = {};
+        for (const c of cats) raw[c.categoryName] = c.score;
+        const g = (name) => norm(name, raw[name] || 0, tMs);
+
+        // === 第一步: 计算所有 UI 目标值 (不论是否要应用到本地) ===
+        // 嘴
+        const smile  = (g('mouthSmileLeft')  + g('mouthSmileRight'))  / 2;
+        const frown  = (g('mouthFrownLeft')  + g('mouthFrownRight'))  / 2;
+        const jaw    = g('jawOpen');
+        const pucker = g('mouthPucker');
+        const funnel = g('mouthFunnel');
+
+        const cornerY  = 60 - smile * 7 + frown * 15;
+        const controlY = Math.min(95, 60 + smile * 26 + jaw * 40 - frown * 14 + funnel * 8);
+        const cornerXL = 15 + pucker * 28;
+        const cornerXR = 85 - pucker * 28;
+
+        // 眨眼 (镜像交换: 用户左眼 → 屏幕右眼)
+        const blinkL = g('eyeBlinkLeft');
+        const blinkR = g('eyeBlinkRight');
+
+        // 注视
+        const lookUp        = (g('eyeLookUpLeft')   + g('eyeLookUpRight'))   / 2;
+        const lookDown      = (g('eyeLookDownLeft') + g('eyeLookDownRight')) / 2;
+        const lookUserLeft  = (g('eyeLookOutLeft')  + g('eyeLookInRight'))   / 2;
+        const lookUserRight = (g('eyeLookInLeft')   + g('eyeLookOutRight'))  / 2;
+        const eyeTX = (lookUserLeft - lookUserRight) * 9;
+        const eyeTY = (lookDown - lookUp) * 6;
+
+        // mood
+        let mood = '...';
+        if (jaw > 0.55)                       mood = 'Wow!';
+        else if (smile > 0.50 && jaw > 0.25)  mood = 'Haha!';
+        else if (smile > 0.45)                mood = 'Hi!';
+        else if (frown > 0.40)                mood = 'Sad.';
+        else if (pucker > 0.50)               mood = 'Hmph.';
+
+        // === 第二步: 快照给 RTK 广播 (无论本地是否被远端接管, 我们都要把自己的脸发出去) ===
+        window.rtkLatestFace = {
+            cXL: cornerXL, cY: cornerY, ctY: controlY, cXR: cornerXR,
+            bL: blinkL, bR: blinkR,
+            eX: eyeTX, eY: eyeTY,
+            mood
+        };
+
+        // === 第三步: 若远端面部数据正在驱动本地 avatar, 跳过本地目标更新 ===
+        // (avoid 本地脸 / 远端脸的双向打架)
+        if (window.rtkRemoteActive) return;
+
+        // === 第四步: 正常本地应用 (现状, 重要: 只在没被手指抓时才更新 target) ===
+        if (!sMouth[0].frozen) sMouth[0].target = cornerXL;
+        if (!sMouth[1].frozen) sMouth[1].target = cornerY;
+        if (!sMouth[2].frozen) sMouth[2].target = 50;
+        if (!sMouth[3].frozen) sMouth[3].target = controlY;
+        if (!sMouth[4].frozen) sMouth[4].target = cornerXR;
+        if (!sMouth[5].frozen) sMouth[5].target = cornerY;
+
+        if (!sRight[3].frozen) sRight[3].target = Math.max(0.05, 1 - blinkL * 1.1);
+        if (!sLeft[3].frozen)  sLeft[3].target  = Math.max(0.05, 1 - blinkR * 1.1);
+        if (!sRight[2].frozen) sRight[2].target = Math.max(0.6, 1 - blinkL * 0.18);
+        if (!sLeft[2].frozen)  sLeft[2].target  = Math.max(0.6, 1 - blinkR * 0.18);
+
+        if (!sLeft[0].frozen)  sLeft[0].target  = eyeTX;
+        if (!sLeft[1].frozen)  sLeft[1].target  = eyeTY;
+        if (!sRight[0].frozen) sRight[0].target = eyeTX;
+        if (!sRight[1].frozen) sRight[1].target = eyeTY;
+
+        if (mood !== lastMood) { lastMood = mood; showBubble(mood); }
+    }
+
+    /* RTK 远端面部应用: 把对方广播过来的脸 (已是 UI 目标值, 不经本地 baseline) 直接写入 smoothing buffers.
+       因为发送端在自己端跑了 baseline 校准, 这些值是"中立脸为 0"语义的, 接收端用本地 baseline 会错位.
+       所以直接绕过 baseline, 写最终目标. */
+    window.rtkApplyRemoteFace = function (payload) {
+        const f = payload && payload.face;
+        if (f) {
+            if (!sMouth[0].frozen) sMouth[0].target = f.cXL;
+            if (!sMouth[1].frozen) sMouth[1].target = f.cY;
+            if (!sMouth[2].frozen) sMouth[2].target = 50;
+            if (!sMouth[3].frozen) sMouth[3].target = f.ctY;
+            if (!sMouth[4].frozen) sMouth[4].target = f.cXR;
+            if (!sMouth[5].frozen) sMouth[5].target = f.cY;
+
+            if (!sRight[3].frozen) sRight[3].target = Math.max(0.05, 1 - f.bL * 1.1);
+            if (!sLeft[3].frozen)  sLeft[3].target  = Math.max(0.05, 1 - f.bR * 1.1);
+            if (!sRight[2].frozen) sRight[2].target = Math.max(0.6, 1 - f.bL * 0.18);
+            if (!sLeft[2].frozen)  sLeft[2].target  = Math.max(0.6, 1 - f.bR * 0.18);
+
+            if (!sLeft[0].frozen)  sLeft[0].target  = f.eX;
+            if (!sLeft[1].frozen)  sLeft[1].target  = f.eY;
+            if (!sRight[0].frozen) sRight[0].target = f.eX;
+            if (!sRight[1].frozen) sRight[1].target = f.eY;
+
+            if (f.mood && f.mood !== '...' && f.mood !== lastMood) {
+                lastMood = f.mood;
+                showBubble(f.mood);
+            }
+        }
+        const p = payload && payload.pose;
+        if (p && !document.body.classList.contains('grabbing')) {
+            sYaw.target   = p.yaw;
+            sPitch.target = p.pitch;
+            sRoll.target  = p.roll;
+        }
+    };
+
+    trackBtn.addEventListener('click', () => {
+        if (window.faceTracking) stopTracking();
+        else startTracking();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && window.faceTracking) stopTracking();
+    });
+</script>
+
+<!-- ============================================================
+     Cloudflare RealtimeKit 集成
+     ============================================================
+     工作模式:
+       1. 无 ?authToken=XXX → Solo (现状: 本地脸驱动本地 avatar)
+       2. 有 ?authToken=XXX → 加入对应 meeting:
+          - 纯音频通话 (双向语音 over RTK SFU)
+          - 本地面部追踪 → 广播给对端 (signaling 通道, ~10Hz)
+          - 收到对端面部数据 → 接管本地 avatar
+            (你看见的 Arc 是对方的脸 puppet, 真·面部视频通话)
+          - End 按钮 → meeting.leave()
+          - Speaker 按钮 → 在保留 smile 触发的同时, 切换远端静音
+
+     authToken 获取 (服务端, 不要把 API key 暴露在客户端!):
+       POST https://api.cloudflare.com/.../realtime/kit/apps                 → app
+       POST .../apps/{appId}/meetings                                        → meeting
+       POST .../meetings/{meetingId}/participants  body:{name, preset_name}  → authToken
+     ============================================================ -->
+<script>
+(function rtkIntegration() {
+    'use strict';
+
+    const statusEl   = document.getElementById('rtk-status');
+    const statusText = document.getElementById('rtk-status-text');
+    function setStatus(stateClass, text) {
+        statusEl.classList.remove('connecting', 'live', 'error');
+        if (stateClass) statusEl.classList.add(stateClass);
+        statusEl.classList.add('visible');
+        statusText.textContent = text;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const authToken = params.get('authToken');
+
+    // === Solo 模式: 完全不干扰现状 ===
+    if (!authToken) return;
+
+    // === 检查 SDK 加载 ===
+    if (typeof window.RealtimeKitClient === 'undefined') {
+        setStatus('error', 'SDK unavailable');
+        console.warn('[RTK] CDN script did not expose RealtimeKitClient.');
+        return;
+    }
+
+    setStatus('connecting', 'Connecting…');
+
+    let meeting = null;
+    let broadcastTimer = null;
+    let remoteFaceClearTimer = null;
+    let remoteAudioMuted = false;
+    const remoteAudioEls = new Map();   // participantId → HTMLAudioElement
+    const BROADCAST_INTERVAL_MS  = 100;  // 10 Hz; 远低于 RTK 服务端速率限制
+    const REMOTE_FACE_TIMEOUT_MS = 800;  // 这么久没新远端数据 → 回退本地驱动
+
+    /* === 初始化 === */
+    window.RealtimeKitClient.init({
+        authToken,
+        defaults: { audio: true, video: false }  // 纯音频; "视频"由 Arc avatar 顶替
+    }).then((m) => {
+        meeting = m;
+        window.rtkMeeting = m;  // 控制台调试用
+
+        // 生命周期事件
+        try {
+            if (m.self && m.self.on) {
+                m.self.on('roomJoined', onJoined);
+                m.self.on('roomLeft',   onLeft);
+            }
+        } catch (_) {}
+
+        // 远端广播 + 参与者增删 + 远端音频
+        try {
+            if (m.participants && m.participants.on) {
+                m.participants.on('broadcastedMessage', handleRemoteBroadcast);
+                m.participants.on('participantJoined',  (p) => { attachRemoteAudio(p); updatePeerCount(); });
+                m.participants.on('participantLeft',    (p) => { detachRemoteAudio(p); updatePeerCount(); });
+            }
+        } catch (_) {}
+
+        // 默认速率上限 5/s 太低, 提到 ~15/s 给面部广播留余裕
+        try {
+            if (m.participants && m.participants.updateRateLimits) {
+                m.participants.updateRateLimits(15, 1);
+            }
+        } catch (_) {}
+
+        return m.join();
+    }).catch((err) => {
+        console.error('[RTK] init/join failed', err);
+        setStatus('error', 'Connection failed');
+    });
+
+    function onJoined() {
+        setStatus('live', 'Live');
+        // 已经在 meeting 里的参与者也要挂上 audio
+        try {
+            const joined = meeting.participants && meeting.participants.joined;
+            if (joined && joined.forEach) joined.forEach(attachRemoteAudio);
+        } catch (_) {}
+        // 启动面部数据广播
+        if (!broadcastTimer) broadcastTimer = setInterval(broadcastLocalFace, BROADCAST_INTERVAL_MS);
+        updatePeerCount();
+    }
+
+    function onLeft() {
+        setStatus(null, 'Call ended');
+        statusEl.classList.remove('connecting', 'live', 'error');
+        if (broadcastTimer) { clearInterval(broadcastTimer); broadcastTimer = null; }
+        if (remoteFaceClearTimer) { clearTimeout(remoteFaceClearTimer); remoteFaceClearTimer = null; }
+        window.rtkRemoteActive = false;
+        remoteAudioEls.forEach((el) => { try { el.pause(); el.remove(); } catch(_){} });
+        remoteAudioEls.clear();
+    }
+
+    function updatePeerCount() {
+        if (!meeting || !meeting.participants) return;
+        let count = 0;
+        try {
+            const joined = meeting.participants.joined;
+            count = (joined && (joined.size != null ? joined.size :
+                    (joined.toArray ? joined.toArray().length : 0))) || 0;
+        } catch (_) {}
+        if (count === 0)      setStatus('live', 'Waiting…');
+        else if (count === 1) setStatus('live', 'Live');
+        else                  setStatus('live', `Live · ${count + 1}`);
+    }
+
+    /* === 远端音频接入 ===
+       Core SDK 不像 UI Kit 那样自动播放, 我们手动把 audioTrack 挂到 <audio>. */
+    function attachRemoteAudio(participant) {
+        if (!participant) return;
+        const pid = participant.id || participant.userId || participant.peerId;
+        if (!pid || remoteAudioEls.has(pid)) return;
+
+        const tryAttach = () => {
+            const track = participant.audioTrack || (participant.audio && participant.audio.track);
+            if (!track) return false;
+            const audio = document.createElement('audio');
+            audio.autoplay = true;
+            audio.playsInline = true;
+            try { audio.srcObject = new MediaStream([track]); } catch (e) { console.warn('[RTK] audio attach', e); return false; }
+            document.body.appendChild(audio);
+            audio.muted = remoteAudioMuted;
+            audio.play().catch(() => { /* 浏览器需要用户手势, 静默吞 */ });
+            remoteAudioEls.set(pid, audio);
+            return true;
+        };
+
+        if (!tryAttach()) {
+            // track 还没就绪, 监听更新事件
+            try {
+                if (participant.on) {
+                    participant.on('audioUpdate', tryAttach);
+                    participant.on('mediaConnectionUpdate', tryAttach);
+                }
+            } catch (_) {}
+        }
+    }
+
+    function detachRemoteAudio(participant) {
+        const pid = participant && (participant.id || participant.userId || participant.peerId);
+        if (!pid) return;
+        const el = remoteAudioEls.get(pid);
+        if (el) { try { el.pause(); el.remove(); } catch(_){} remoteAudioEls.delete(pid); }
+    }
+
+    /* === 本地面部 → 广播 ===
+       发出去的不是原始 blendshape, 而是已经 baseline+gain 处理后的 UI 目标值,
+       这样接收端不必有相同校准基线就能直接 puppet. */
+    function broadcastLocalFace() {
+        if (!meeting || !meeting.participants) return;
+        const face = window.rtkLatestFace;
+        const pose = window.rtkLatestPose;
+        if (!face && !pose) return;  // 本地还没启动面部追踪
+        try {
+            const r = (v) => Math.round(v * 100) / 100;
+            const compact = {};
+            if (face) compact.face = {
+                cXL: r(face.cXL), cY: r(face.cY), ctY: r(face.ctY), cXR: r(face.cXR),
+                bL:  r(face.bL),  bR: r(face.bR), eX:  r(face.eX),  eY:  r(face.eY),
+                mood: face.mood
+            };
+            if (pose) compact.pose = { yaw: r(pose.yaw), pitch: r(pose.pitch), roll: r(pose.roll) };
+            meeting.participants.broadcastMessage('arc-face', compact);
+        } catch (e) {
+            // rate-limit / 通道临时不可用, 丢这帧, 下 tick 自动重试
+        }
+    }
+
+    /* === 远端广播 → 本地 avatar === */
+    function handleRemoteBroadcast(evt) {
+        // SDK 版本间 evt 形态略有不同, 兼容多形:
+        //   v1: { type, payload, participant }
+        //   v2: { message: { type, payload } }
+        //   v3: type, payload 在顶层 + participantId
+        const type = (evt && evt.type) || (evt && evt.message && evt.message.type);
+        if (type !== 'arc-face') return;
+
+        const data = (evt && evt.payload)
+                  || (evt && evt.message && (evt.message.payload || evt.message))
+                  || null;
+        if (!data) return;
+
+        // 过滤自己发出的回声 (broadcastMessage 默认会回送自己)
+        const senderId = (evt && evt.participantId)
+                     || (evt && evt.participant && evt.participant.id)
+                     || (evt && evt.from)
+                     || null;
+        const localId  = (meeting && meeting.self && meeting.self.id) || null;
+        if (senderId && localId && senderId === localId) return;
+
+        // 标记远端激活, 让本地 applyBlendshapes / applyHeadPoseFromMatrix 让出 UI
+        window.rtkRemoteActive = true;
+        if (remoteFaceClearTimer) clearTimeout(remoteFaceClearTimer);
+        remoteFaceClearTimer = setTimeout(() => {
+            window.rtkRemoteActive = false;  // 远端断流 → 回退本地
+        }, REMOTE_FACE_TIMEOUT_MS);
+
+        if (window.rtkApplyRemoteFace) window.rtkApplyRemoteFace(data);
+    }
+
+    /* === UI 按钮接入 === */
+
+    // End: 离开会议 + 视觉禁用
+    const endBtn = document.querySelector('.btn-end');
+    if (endBtn) {
+        endBtn.addEventListener('click', async () => {
+            if (!meeting) return;
+            endBtn.style.opacity = '0.4';
+            endBtn.style.pointerEvents = 'none';
+            try { await meeting.leave(); }
+            catch (e) { console.error('[RTK] leave failed', e); }
+            onLeft();
+        });
+    }
+
+    // Speaker: 已有 onclick 触发 smile 演示, 我们加一层 "切远端静音"
+    // (smile 触发保留为视觉反馈; 静音状态加 .muted class 给 CSS 留出钩子)
+    const speakerBtn = document.querySelector('.btn-speaker');
+    if (speakerBtn) {
+        speakerBtn.addEventListener('click', () => {
+            if (!meeting) return;  // solo: 只跑原 smile demo
+            remoteAudioMuted = !remoteAudioMuted;
+            speakerBtn.classList.toggle('muted', remoteAudioMuted);
+            // 把已挂的 <audio> 元素全部静音/恢复
+            remoteAudioEls.forEach((el) => { el.muted = remoteAudioMuted; });
+        });
+    }
+})();
+</script>
+
+</body>
+</html>
